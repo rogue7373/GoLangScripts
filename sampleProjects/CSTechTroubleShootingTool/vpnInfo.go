@@ -1,41 +1,50 @@
-package main
+package ipaddress
 
 import (
-	"fmt"
+	"errors"
+	"net"
 	"os/exec"
+	"runtime"
 	"strings"
 )
 
-func main() {
-	// Run the "scutil" command to get VPN information
-	cmd := exec.Command("scutil", "--nc", "status")
-	output, err := cmd.CombinedOutput()
+func GetIPAddress() ([]string, error) {
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("ipconfig")
+	} else if runtime.GOOS == "darwin" {
+		cmd = exec.Command("ifconfig")
+	} else {
+		return nil, errors.New("unsupported operating system")
+	}
+
+	output, err := cmd.Output()
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		return nil, err
 	}
 
-	// Convert the output to a string
-	outputStr := string(output)
+	interfaces := strings.Split(string(output), "\n\n")
+	var ipAddresses []string
 
-	// Split the output into lines
-	lines := strings.Split(outputStr, "\n")
-
-	// Iterate through the lines to find the VPN information
-	var vpnName string
-	var ipAddress string
-	for _, line := range lines {
-		if strings.HasPrefix(line, "Connected") {
-			// Extract the VPN name from the "Connected" line
-			vpnName = strings.TrimSpace(strings.TrimPrefix(line, "Connected"))
-		}
-		if strings.HasPrefix(line, "Server address:") {
-			// Extract the IP address from the "Server address" line
-			ipAddress = strings.TrimSpace(strings.TrimPrefix(line, "Server address:"))
+	for _, iface := range interfaces {
+		if len(iface) > 0 && !strings.Contains(iface, "loopback") && !strings.Contains(iface, "virtual network") {
+			addrs, err := net.InterfaceAddrs()
+			if err != nil {
+				continue
+			}
+			for _, addr := range addrs {
+				ipNet, ok := addr.(*net.IPNet)
+				if ok && !ipNet.IP.IsLoopback() {
+					if ipNet.IP.To4() != nil {
+						ip := strings.TrimSpace(ipNet.IP.String())
+						if len(ip) > 0 {
+							ipAddresses = append(ipAddresses, ip)
+						}
+					}
+				}
+			}
 		}
 	}
 
-	// Print the VPN name and IP address
-	fmt.Println("VPN Name:", vpnName)
-	fmt.Println("IP Address:", ipAddress)
+	return ipAddresses, nil
 }
